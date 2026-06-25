@@ -6,7 +6,11 @@ name: AuraOrderFlow Bot
 # the Docker image to an always-on host (see README) - the same code, no change.
 
 on:
-  workflow_dispatch: {}        # run manually from the Actions tab / API
+  workflow_dispatch:
+    inputs:
+      max_runtime:
+        description: "Max seconds to run (use ~90 for a quick connectivity test)"
+        default: "21000"
   schedule:
     - cron: "0 */6 * * *"      # every 6 hours (UTC)
 
@@ -35,5 +39,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           LOG_LEVEL: INFO
-          MAX_RUNTIME_SECONDS: "21000"   # ~5h50m, then exit for a clean restart
+          # input on manual dispatch; 21000 (~5h50m) on schedule / when omitted
+          MAX_RUNTIME_SECONDS: ${{ inputs.max_runtime || '21000' }}
         run: python -m auraorderflow
