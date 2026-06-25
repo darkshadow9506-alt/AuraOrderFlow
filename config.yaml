@@ -17,6 +17,12 @@ strategy:
   imbalance_ratio: 3.0      # footprint imbalance threshold (3:1)
   signal_cooldown_seconds: 1200  # min gap between same symbol+side alerts
 
+  # --- multi-timeframe layer ---
+  htf_lookback_minutes: 60     # higher-timeframe trend window (1m bars => ~1h)
+  require_htf_alignment: true  # continuation trades must match the HTF trend
+  use_vwap: true               # session VWAP as a structural level
+  use_prev_day_levels: true    # previous-day high/low as structural levels
+
 # Markets with REAL, free, real-time order flow (Binance USD-M Futures).
 # These are the deep, liquid markets where order flow is actually tradeable;
 # illiquid alts have noisy, unreliable footprints, so they are deliberately

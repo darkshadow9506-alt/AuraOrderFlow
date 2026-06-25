@@ -48,6 +48,10 @@ class Bot:
             confidence_scale=config.strategy.confidence_scale,
             risk_reward=config.strategy.risk_reward,
             imbalance_ratio=config.strategy.imbalance_ratio,
+            htf_lookback_minutes=config.strategy.htf_lookback_minutes,
+            require_htf_alignment=config.strategy.require_htf_alignment,
+            use_vwap=config.strategy.use_vwap,
+            use_prev_day_levels=config.strategy.use_prev_day_levels,
         )
 
         self.states: dict[str, SymbolState] = {}

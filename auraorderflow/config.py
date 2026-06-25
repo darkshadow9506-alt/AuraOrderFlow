@@ -44,6 +44,11 @@ class StrategyConfig:
     risk_reward: float = 2.0
     imbalance_ratio: float = 3.0
     signal_cooldown_seconds: int = 900
+    # multi-timeframe layer
+    htf_lookback_minutes: int = 60
+    require_htf_alignment: bool = True
+    use_vwap: bool = True
+    use_prev_day_levels: bool = True
 
 
 @dataclass(slots=True)
@@ -109,6 +114,10 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         risk_reward=float(s_raw.get("risk_reward", 2.0)),
         imbalance_ratio=float(s_raw.get("imbalance_ratio", 3.0)),
         signal_cooldown_seconds=int(s_raw.get("signal_cooldown_seconds", 900)),
+        htf_lookback_minutes=int(s_raw.get("htf_lookback_minutes", 60)),
+        require_htf_alignment=bool(s_raw.get("require_htf_alignment", True)),
+        use_vwap=bool(s_raw.get("use_vwap", True)),
+        use_prev_day_levels=bool(s_raw.get("use_prev_day_levels", True)),
     )
 
     chat_ids = [

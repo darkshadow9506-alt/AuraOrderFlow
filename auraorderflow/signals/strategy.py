@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from ..orderflow.analyzers import (
     LONG,
+    NEUTRAL,
     SHORT,
     Detection,
     absorption,
@@ -68,6 +69,10 @@ class StrategyEngine:
         confidence_scale: float = 2.6,
         risk_reward: float = 2.0,
         imbalance_ratio: float = 3.0,
+        htf_lookback_minutes: int = 60,
+        require_htf_alignment: bool = True,
+        use_vwap: bool = True,
+        use_prev_day_levels: bool = True,
         weights: dict[str, float] | None = None,
     ) -> None:
         self.min_bars = min_bars
@@ -78,7 +83,31 @@ class StrategyEngine:
         self.confidence_scale = confidence_scale
         self.risk_reward = risk_reward
         self.imbalance_ratio = imbalance_ratio
+        self.htf_lookback_minutes = htf_lookback_minutes
+        self.require_htf_alignment = require_htf_alignment
+        self.use_vwap = use_vwap
+        self.use_prev_day_levels = use_prev_day_levels
         self.weights = weights or DEFAULT_WEIGHTS
+
+    # -- higher-timeframe bias ---------------------------------------------
+    def _htf_bias(self, engine: OrderFlowEngine) -> str:
+        """Coarse higher-timeframe trend from price + CVD slope.
+
+        Long only when BOTH price and cumulative delta rose over the lookback
+        window (genuine buyer-led uptrend), short when both fell, otherwise
+        neutral. Bars are 1-minute, so ``htf_lookback_minutes`` ~= the higher
+        timeframe in minutes.
+        """
+        bars = engine.recent_bars(self.htf_lookback_minutes)
+        if len(bars) < 10:
+            return NEUTRAL
+        price_chg = bars[-1].close - bars[0].close
+        cvd_chg = bars[-1].cvd - bars[0].cvd
+        if price_chg > 0 and cvd_chg > 0:
+            return LONG
+        if price_chg < 0 and cvd_chg < 0:
+            return SHORT
+        return NEUTRAL
 
     # -- structural level detection ----------------------------------------
     def _level_context(self, engine: OrderFlowEngine, price: float):
@@ -99,6 +128,15 @@ class StrategyEngine:
             candidates.append(("Value Area Low", profile.val))
         candidates += [("HVN", p) for p in profile.hvns]
         candidates += [("LVN", p) for p in profile.lvns]
+
+        # multi-timeframe / session structural levels
+        if self.use_vwap and engine.vwap is not None:
+            candidates.append(("VWAP", engine.vwap))
+        if self.use_prev_day_levels:
+            if engine.prev_day_high is not None:
+                candidates.append(("Prev Day High", engine.prev_day_high))
+            if engine.prev_day_low is not None:
+                candidates.append(("Prev Day Low", engine.prev_day_low))
 
         bars = engine.recent_bars(self.min_bars)
         if len(bars) >= 5:
@@ -198,6 +236,19 @@ class StrategyEngine:
         elif ctx is not None:
             reasons = [f"initiative {'long' if side == LONG else 'short'} "
                        f"through {ctx[0]}"] + reasons
+
+        # -- higher-timeframe alignment (multi-timeframe layer) -------------
+        htf = self._htf_bias(engine)
+        if htf != NEUTRAL:
+            aligned = (side == LONG and htf == LONG) or (side == SHORT and htf == SHORT)
+            # initiative/continuation must not fight the higher-timeframe trend;
+            # responsive reversals at a level are allowed to fade it.
+            if not aligned and not responsive and self.require_htf_alignment:
+                return None
+            if aligned:
+                confidence = min(100.0, confidence * 1.05)
+                trend = "uptrend" if htf == LONG else "downtrend"
+                reasons = [f"with higher-timeframe {trend}"] + reasons
 
         if confidence < self.min_confidence:
             return None

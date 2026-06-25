@@ -89,7 +89,8 @@ Mapped to the order-flow catalogue you provided:
 | #9 Initiative vs responsive | `StrategyEngine` classifies the setup and applies the location filter |
 | #10 Volume exhaustion / climax | `exhaustion()` — climax volume into an extreme with a poor result |
 | #11 Auction market theory | responsive reversals only on the correct side of value; initiative trades ride momentum |
-| Bonus: combinations | `StrategyEngine` confluence — **primary trigger** at the **right side** of a level **plus** confirmations |
+| Multi-timeframe | higher-TF trend filter (~60m, price+CVD) + session **VWAP** + **prev-day** high/low as levels |
+| Bonus: combinations | `StrategyEngine` confluence — **primary trigger** at the **right side** of a level, **with the higher-TF trend**, plus confirmations |
 
 **How signals are gated (the way real order-flow traders stack edges):** a valid
 setup must (1) occur **at a structural level**, (2) include at least one
@@ -102,7 +103,12 @@ On top of that, **auction location logic** (initiative vs responsive): a
 only fires on the correct side of the auction — **longs at support, shorts at
 resistance** — so the bot never fades a reversal into the wrong edge. *Initiative*
 setups (stacked imbalance / CVD / book pressure) ride momentum through a level
-instead. Opposing flow is netted against the setup before scoring. Microstructure
+instead. Opposing flow is netted against the setup before scoring.
+
+Finally a **multi-timeframe layer**: a higher-timeframe trend (~60m, from price +
+cumulative delta) filters the 1-minute flow — initiative/continuation trades must
+agree with it, while responsive reversals at a level may fade it; and **session
+VWAP** plus **previous-day high/low** are added as structural levels. Microstructure
 scalping (#12) is intentionally **not** automated — it depends on
 latency/colocation, not something a polled feed can do honestly.
 

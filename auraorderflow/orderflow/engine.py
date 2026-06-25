@@ -8,6 +8,7 @@ caller can run analysis exactly once per completed bar.
 from __future__ import annotations
 
 from collections import deque
+from datetime import datetime, timezone
 
 from .book import BookTracker
 from .models import Bar, OrderBookSnapshot, Trade
@@ -33,6 +34,17 @@ class OrderFlowEngine:
         self.book: OrderBookSnapshot | None = None
         self.book_tracker = BookTracker()
 
+        # higher-timeframe / session context (built from the same trade stream)
+        self._vwap_pv = 0.0          # sum(price * qty) for the current UTC day
+        self._vwap_vol = 0.0         # sum(qty) for the current UTC day
+        self._day = None             # current UTC date
+        self._day_high: float | None = None
+        self._day_low: float | None = None
+        self._day_close: float | None = None
+        self.prev_day_high: float | None = None
+        self.prev_day_low: float | None = None
+        self.prev_day_close: float | None = None
+
     # -- ingestion ----------------------------------------------------------
     def _bar_start(self, ts: int) -> int:
         return ts - (ts % self.period_ms)
@@ -50,10 +62,36 @@ class OrderFlowEngine:
             # is created; empty intermediate minutes are simply skipped.
             self.current = self._new_bar(start)
 
+        self._update_session(trade)
         self.cvd += trade.signed_qty
         self.current.add_trade(trade)
         self.current.cvd = self.cvd
         return closed
+
+    def _update_session(self, trade: Trade) -> None:
+        """Maintain session VWAP and previous-day high/low/close (UTC days)."""
+        day = datetime.fromtimestamp(trade.timestamp / 1000, tz=timezone.utc).date()
+        if self._day is None:
+            self._day = day
+        elif day != self._day:
+            # day rollover: freeze the day that just ended, reset accumulators
+            self.prev_day_high = self._day_high
+            self.prev_day_low = self._day_low
+            self.prev_day_close = self._day_close
+            self._day = day
+            self._vwap_pv = self._vwap_vol = 0.0
+            self._day_high = self._day_low = None
+
+        p = trade.price
+        self._day_high = p if self._day_high is None else max(self._day_high, p)
+        self._day_low = p if self._day_low is None else min(self._day_low, p)
+        self._day_close = p
+        self._vwap_pv += p * trade.qty
+        self._vwap_vol += trade.qty
+
+    @property
+    def vwap(self) -> float | None:
+        return self._vwap_pv / self._vwap_vol if self._vwap_vol > 0 else None
 
     def on_orderbook(self, snapshot: OrderBookSnapshot) -> None:
         self.book = snapshot
