@@ -46,6 +46,26 @@ def test_absorption_short_on_absorbed_buying():
     assert det.side == SHORT and det.hit
 
 
+def test_absorption_rejects_large_body():
+    # heavy one-sided volume, but price actually moved a lot (big body) ->
+    # this is NOT absorption (effort produced result) -> must be neutral
+    history = [raw_bar(buy=5, sell=5) for _ in range(12)]
+    moved = raw_bar(open=100, high=104, low=100, close=103.5, buy=5, sell=45)
+    assert not absorption(moved, history + [moved]).hit
+
+
+def test_stacked_imbalance_ignores_thin_levels():
+    # one dominant level + a few thin levels that form a ratio imbalance but
+    # carry negligible volume -> must not count as a stacked imbalance
+    specs = [(100.0, 1000.0, False), (100.0, 1.0, True)]
+    for p in (101, 102, 103):
+        specs.append((float(p), 5.0, False))
+    for p in (101, 102):
+        specs.append((float(p), 1.0, True))
+    bar = bar_from_trades(specs, step=1.0)
+    assert not stacked_imbalance(bar, ratio=3.0, min_stack=3).hit
+
+
 def test_delta_divergence_bullish():
     bars = []
     for i in range(6):

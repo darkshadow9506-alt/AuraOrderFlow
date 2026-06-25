@@ -25,7 +25,8 @@ def test_confluence_long_signal_at_level():
     )
     eng = _engine_with(bars)
 
-    sig = StrategyEngine().evaluate(eng)
+    # explicit thresholds so this stays decoupled from production defaults
+    sig = StrategyEngine(min_confidence=60, min_confirmations=2).evaluate(eng)
     assert sig is not None
     assert sig.side == "LONG"
     assert sig.confidence >= 60
@@ -56,4 +57,6 @@ def test_signal_requires_structural_level():
     )
     eng = _engine_with(bars)
     # price 200 is nowhere near the POC at 100 -> no trade in the middle
-    assert StrategyEngine(require_level=True).evaluate(eng) is None
+    assert StrategyEngine(
+        require_level=True, min_confidence=60, min_confirmations=2
+    ).evaluate(eng) is None

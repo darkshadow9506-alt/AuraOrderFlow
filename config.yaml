@@ -8,14 +8,14 @@ profile_window: 240        # bars used to build the volume profile (~4h of 1m)
 history_window: 300        # bars kept in memory per symbol
 
 strategy:
-  min_confidence: 62        # 0-100; raise to get fewer, higher-quality signals
-  min_confirmations: 2      # how many order-flow patterns must agree
+  min_confidence: 72        # 0-100; higher = fewer, higher-quality signals
+  min_confirmations: 3      # how many order-flow patterns must agree
   require_level: true       # only fire at structural levels (rule #1)
-  level_tolerance_pct: 0.0015   # how close to a level counts as "at" it (0.15%)
+  level_tolerance_pct: 0.0012   # how close to a level counts as "at" it (0.12%)
   confidence_scale: 2.6     # confluence-score -> confidence calibration
   risk_reward: 2.0          # suggested target = risk_reward * stop distance
   imbalance_ratio: 3.0      # footprint imbalance threshold (3:1)
-  signal_cooldown_seconds: 900  # min gap between same symbol+side alerts
+  signal_cooldown_seconds: 1200  # min gap between same symbol+side alerts
 
 # Markets with REAL, free, real-time order flow (Binance USD-M Futures).
 # These are the deep, liquid markets where order flow is actually tradeable;

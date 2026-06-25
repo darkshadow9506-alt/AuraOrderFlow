@@ -48,6 +48,7 @@ def stacked_imbalance(
     ratio: float = 3.0,
     min_stack: int = 3,
     min_level_volume: float = 0.0,
+    min_level_factor: float = 0.5,
 ) -> Detection:
     """Detect stacked *diagonal* footprint imbalances inside one bar.
 
@@ -55,6 +56,11 @@ def stacked_imbalance(
     (aggressive buys) is compared with the bid volume traded one level *below*
     (aggressive sells). ``ratio``+ consecutive levels in one direction = a
     stacked imbalance, a strong initiative footprint.
+
+    Thin levels are ignored: a level only counts if its aggressive volume is at
+    least ``min_level_factor`` of the bar's mean per-level volume (or the
+    explicit ``min_level_volume`` floor), so a 2:0 print on a near-empty level
+    can't masquerade as an imbalance.
     """
     fp = bar.footprint
     if len(fp) < min_stack + 1:
@@ -63,6 +69,8 @@ def stacked_imbalance(
     levels = sorted(fp)
     step = bar.price_step
     eps = 1e-9
+    mean_level = sum(b + s for b, s in fp.values()) / len(fp)
+    floor = max(min_level_volume, mean_level * min_level_factor)
 
     buy_flags: list[bool] = []
     sell_flags: list[bool] = []
@@ -74,10 +82,10 @@ def stacked_imbalance(
         bid_below = fp.get(below, [0.0, 0.0])[1]
         ask_above = fp.get(above, [0.0, 0.0])[0]
         buy_flags.append(
-            ask_vol >= min_level_volume and ask_vol >= ratio * (bid_below + eps)
+            ask_vol >= floor and ask_vol >= ratio * (bid_below + eps)
         )
         sell_flags.append(
-            bid_vol >= min_level_volume and bid_vol >= ratio * (ask_above + eps)
+            bid_vol >= floor and bid_vol >= ratio * (ask_above + eps)
         )
 
     def longest_run(flags: list[bool]) -> int:
@@ -152,14 +160,16 @@ def absorption(
     book: OrderBookSnapshot | None = None,
     vol_factor: float = 1.8,
     delta_ratio: float = 0.35,
-    body_ratio: float = 0.35,
+    body_ratio: float = 0.5,
 ) -> Detection:
     """Aggressive one-sided flow that fails to move price = absorption.
 
     A heavy, strongly one-sided bar whose *result* (the close) does not extend
     in the direction of that aggression means resting limits absorbed it. Heavy
     selling that closes firm => bullish; heavy buying that closes weak =>
-    bearish. When a book snapshot is available, confirmation requires sizeable
+    bearish. The "fails to move price" part is enforced by ``body_ratio``: the
+    candle body must be no more than that fraction of its range (effort without
+    result). When a book snapshot is available, confirmation requires sizeable
     resting liquidity on the side that did the absorbing.
     """
     history = bars[-30:]
@@ -174,9 +184,11 @@ def absorption(
         return Detection("absorption", NEUTRAL, 0.0, "delta not one-sided")
 
     body = abs(bar.close - bar.open) / bar.range  # small body => effort w/o result
+    if body > body_ratio:
+        return Detection("absorption", NEUTRAL, 0.0, "body too large (price moved)")
 
     # Heavy selling (delta<0) but price held -> buyers absorbed -> LONG
-    if bar.delta < 0 and bar.close >= bar.open and body <= 1.0:
+    if bar.delta < 0 and bar.close >= bar.open:
         score = min(1.0, one_sided * (bar.volume / (avg * vol_factor)))
         if book is not None and book.imbalance() < 0.05:
             score *= 0.6  # no resting bid support -> weaker
@@ -185,7 +197,7 @@ def absorption(
             f"heavy sell delta {bar.delta:.1f} absorbed, price held",
         )
     # Heavy buying (delta>0) but price stalled -> sellers absorbed -> SHORT
-    if bar.delta > 0 and bar.close <= bar.open and body <= 1.0:
+    if bar.delta > 0 and bar.close <= bar.open:
         score = min(1.0, one_sided * (bar.volume / (avg * vol_factor)))
         if book is not None and book.imbalance() > -0.05:
             score *= 0.6
