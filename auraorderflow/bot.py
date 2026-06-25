@@ -37,6 +37,8 @@ class Bot:
         self.started_at = time.time()
         self.signal_count = 0
         self._last_signal: dict[tuple[str, str], int] = {}
+        # strong refs to in-flight send tasks so they are not GC'd mid-flight
+        self._bg_tasks: set[asyncio.Task] = set()
 
         self.strategy = StrategyEngine(
             min_confidence=config.strategy.min_confidence,
@@ -146,7 +148,9 @@ class Bot:
             "SIGNAL %s %s @ %g (%.0f%%)",
             signal_obj.side, signal_obj.symbol, signal_obj.price, signal_obj.confidence,
         )
-        asyncio.create_task(self.notifier.send(text))
+        task = asyncio.create_task(self.notifier.send(text))
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     # -- telegram commands --------------------------------------------------
     async def _handle_command(self, cmd: str, args: str) -> str | None:
@@ -197,6 +201,9 @@ class Bot:
         return "\n".join(lines)
 
     def _levels_message(self, symbol: str) -> str:
+        if not symbol:
+            example = next(iter(self.states.values())).cfg.label
+            return f"usage: /levels &lt;symbol&gt; — e.g. /levels {example}"
         state = self.states.get(symbol)
         if state is None:
             for st in self.states.values():

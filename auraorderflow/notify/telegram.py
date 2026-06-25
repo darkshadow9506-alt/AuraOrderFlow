@@ -20,6 +20,10 @@ log = get_logger(__name__)
 
 CommandHandler = Callable[[str, str], Awaitable[str | None]]
 
+# Explicit ClientTimeout objects (version-proof vs passing bare numbers).
+_SEND_TIMEOUT = aiohttp.ClientTimeout(total=15)
+_POLL_TIMEOUT = aiohttp.ClientTimeout(total=40)  # > the 25s long-poll below
+
 
 class TelegramNotifier:
     def __init__(
@@ -70,7 +74,7 @@ class TelegramNotifier:
             }
             try:
                 async with session.post(
-                    self._api("sendMessage"), json=payload, timeout=15
+                    self._api("sendMessage"), json=payload, timeout=_SEND_TIMEOUT
                 ) as resp:
                     if resp.status != 200:
                         body = await resp.text()
@@ -89,7 +93,7 @@ class TelegramNotifier:
                 async with session.get(
                     self._api("getUpdates"),
                     params={"offset": offset, "timeout": 25},
-                    timeout=40,
+                    timeout=_POLL_TIMEOUT,
                 ) as resp:
                     data = await resp.json()
             except asyncio.CancelledError:
