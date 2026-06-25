@@ -2,11 +2,11 @@ name: AuraOrderFlow Bot
 
 # Free "always-on-ish" runner: a GitHub Actions job is capped at 6h, so we run
 # the bot for ~5h50m then exit cleanly, and a cron restarts it. Expect a short
-# (seconds–minutes) gap between restarts. For true 24/7 with no gaps, deploy the
-# Docker image to an always-on host (see README) — the same code, no changes.
+# gap (seconds to minutes) between restarts. For true 24/7 with no gaps, deploy
+# the Docker image to an always-on host (see README) - the same code, no change.
 
 on:
-  workflow_dispatch: {}        # run manually from the Actions tab
+  workflow_dispatch: {}        # run manually from the Actions tab / API
   schedule:
     - cron: "0 */6 * * *"      # every 6 hours (UTC)
 
