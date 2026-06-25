@@ -81,23 +81,30 @@ Mapped to the order-flow catalogue you provided:
 | #1 Absorption / #9 Responsive flow | `absorption()` — heavy one-sided volume that fails to move price (+ book confirmation) |
 | #2 Imbalance / Stacked imbalance | `stacked_imbalance()` — diagonal footprint imbalances (≥3:1, stacked) |
 | #3 Delta-based / divergence | `delta_divergence()` + `cvd_trend()` — price vs cumulative delta |
-| #4 Volume Profile confluence | `volume_profile.py` + the "must be at a level" gate |
+| #4 Volume Profile confluence | `volume_profile.py` + a **directional** level gate (support vs resistance) |
 | #5 Stop run / liquidity grab | `stop_run()` — sweep a swing then reject/reclaim back inside |
 | #6 Iceberg detection | `iceberg()` — executed size ≫ displayed resting size at a level |
 | #7 Spoofing / pulled liquidity | `liquidity_pull()` — a large resting side that vanished (via `BookTracker`) |
 | #8 Order-book / DOM pressure | `book_pressure()` — time-averaged book imbalance |
+| #9 Initiative vs responsive | `StrategyEngine` classifies the setup and applies the location filter |
 | #10 Volume exhaustion / climax | `exhaustion()` — climax volume into an extreme with a poor result |
-| #11 Auction market theory | structural levels (VAH/VAL/POC) used as the trade gate |
-| Bonus: combinations | `StrategyEngine` confluence — requires a **primary trigger** at a level **plus** confirmations |
+| #11 Auction market theory | responsive reversals only on the correct side of value; initiative trades ride momentum |
+| Bonus: combinations | `StrategyEngine` confluence — **primary trigger** at the **right side** of a level **plus** confirmations |
 
 **How signals are gated (the way real order-flow traders stack edges):** a valid
 setup must (1) occur **at a structural level**, (2) include at least one
 **primary trigger** — absorption, stacked imbalance, stop-run, iceberg or
 climax — and (3) accumulate enough **confirming** flow (delta divergence, CVD
 trend, book pressure, liquidity pull) to clear the confidence threshold.
-Opposing flow is netted against the setup before scoring. Microstructure scalping
-(#12) is intentionally **not** automated — it depends on latency/colocation, not
-something a polled feed can do honestly.
+
+On top of that, **auction location logic** (initiative vs responsive): a
+*responsive* setup (reversal — absorption/exhaustion/stop-run/iceberg/divergence)
+only fires on the correct side of the auction — **longs at support, shorts at
+resistance** — so the bot never fades a reversal into the wrong edge. *Initiative*
+setups (stacked imbalance / CVD / book pressure) ride momentum through a level
+instead. Opposing flow is netted against the setup before scoring. Microstructure
+scalping (#12) is intentionally **not** automated — it depends on
+latency/colocation, not something a polled feed can do honestly.
 
 ## Markets
 

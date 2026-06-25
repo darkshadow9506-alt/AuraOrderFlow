@@ -8,10 +8,17 @@ score in ``[0, 1]`` so the strategy layer can combine them by confluence.
 Implemented patterns (mapped to the user's strategy catalogue):
 
 * :func:`stacked_imbalance`  - #2 Imbalance (diagonal footprint imbalances)
-* :func:`delta_divergence`   - #3 Delta-based / #4 VP confluence
+* :func:`delta_divergence`   - #3 Delta-based divergence
 * :func:`absorption`         - #1 Absorption / responsive flow (#9)
 * :func:`exhaustion`         - #10 Volume exhaustion & climax
 * :func:`cvd_trend`          - #3 Cumulative-delta trend / initiative flow
+* :func:`stop_run`           - #5 Stop run / liquidity grab
+* :func:`iceberg`            - #6 Iceberg / hidden-liquidity detection
+* :func:`book_pressure`      - #8 Order-book / DOM pressure
+* :func:`liquidity_pull`     - #7 Spoofing / pulled liquidity
+
+The directional use of volume-profile levels (#4) and the initiative-vs-
+responsive auction logic (#9, #11) live in :mod:`auraorderflow.signals.strategy`.
 """
 from __future__ import annotations
 

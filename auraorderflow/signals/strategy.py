@@ -48,6 +48,13 @@ DEFAULT_WEIGHTS = {
 # way real order-flow traders work: a trigger at a level, then confirmation.
 PRIMARY = {"absorption", "stacked_imbalance", "stop_run", "iceberg", "exhaustion"}
 
+# Initiative vs responsive flow (auction market theory). Responsive patterns
+# fade an extreme (reversal) and are only valid on the right side of a level —
+# longs at support, shorts at resistance. Initiative patterns ride momentum and
+# are not location-constrained.
+RESPONSIVE = {"absorption", "exhaustion", "stop_run", "iceberg", "delta_divergence"}
+INITIATIVE = {"stacked_imbalance", "cvd_trend", "book_pressure", "liquidity_pull"}
+
 
 class StrategyEngine:
     def __init__(
@@ -74,7 +81,14 @@ class StrategyEngine:
         self.weights = weights or DEFAULT_WEIGHTS
 
     # -- structural level detection ----------------------------------------
-    def _nearest_level(self, engine: OrderFlowEngine, price: float):
+    def _level_context(self, engine: OrderFlowEngine, price: float):
+        """Nearest structural level *and* whether it is support or resistance.
+
+        ``kind`` = ``support`` when the level sits at/below price (price resting
+        on it) and ``resistance`` when it sits at/above. This is what lets the
+        strategy trade *responsive* reversals on the correct side of the
+        auction instead of fading into the wrong edge.
+        """
         profile = engine.volume_profile()
         candidates: list[tuple[str, float]] = []
         if profile.poc is not None:
@@ -100,7 +114,11 @@ class StrategyEngine:
             d = abs(price - lvl)
             if d <= best_dist:
                 best, best_dist = (name, lvl), d
-        return best  # (name, level) | None
+        if best is None:
+            return None
+        name, lvl = best
+        kind = "support" if lvl <= price else "resistance"
+        return (name, lvl, kind)
 
     # -- main evaluation ----------------------------------------------------
     def evaluate(self, engine: OrderFlowEngine) -> Signal | None:
@@ -112,8 +130,8 @@ class StrategyEngine:
         if price <= 0:
             return None
 
-        level = self._nearest_level(engine, price)
-        if self.require_level and level is None:
+        ctx = self._level_context(engine, price)
+        if self.require_level and ctx is None:
             return None
 
         detections: list[Detection] = [
@@ -129,8 +147,10 @@ class StrategyEngine:
         ]
 
         agg = {
-            LONG: {"score": 0.0, "reasons": [], "hits": 0, "primary": 0},
-            SHORT: {"score": 0.0, "reasons": [], "hits": 0, "primary": 0},
+            LONG: {"score": 0.0, "reasons": [], "hits": 0, "primary": 0,
+                   "resp": 0.0, "init": 0.0},
+            SHORT: {"score": 0.0, "reasons": [], "hits": 0, "primary": 0,
+                    "resp": 0.0, "init": 0.0},
         }
         for det in detections:
             if not det.hit or det.side not in agg:
@@ -142,6 +162,10 @@ class StrategyEngine:
             bucket["hits"] += 1
             if det.name in PRIMARY:
                 bucket["primary"] += 1
+            if det.name in RESPONSIVE:
+                bucket["resp"] += w * det.score
+            elif det.name in INITIATIVE:
+                bucket["init"] += w * det.score
 
         if agg[LONG]["score"] >= agg[SHORT]["score"]:
             side, win, opp = LONG, agg[LONG], agg[SHORT]
@@ -152,16 +176,34 @@ class StrategyEngine:
         net = win["score"] - 0.5 * opp["score"]
         confidence = max(0.0, min(100.0, net / self.confidence_scale * 100.0))
 
-        if (
-            win["primary"] < 1
-            or win["hits"] < self.min_confirmations
-            or confidence < self.min_confidence
-        ):
+        if win["primary"] < 1 or win["hits"] < self.min_confirmations:
             return None
+
+        # -- auction location logic (initiative vs responsive) --------------
         reasons = win["reasons"]
+        responsive = win["resp"] >= win["init"]
+        if responsive and ctx is not None:
+            _, lvl, kind = ctx
+            eps = price * 1e-6
+            # don't fade into the wrong side of the auction
+            if side == LONG and lvl > price + eps:
+                return None  # responsive long beneath resistance
+            if side == SHORT and lvl < price - eps:
+                return None  # responsive short above support
+            confidence = min(100.0, confidence * 1.05)  # location confluence
+            reasons = [
+                f"responsive {'long' if side == LONG else 'short'} at "
+                f"{ctx[0]} ({kind})"
+            ] + reasons
+        elif ctx is not None:
+            reasons = [f"initiative {'long' if side == LONG else 'short'} "
+                       f"through {ctx[0]}"] + reasons
+
+        if confidence < self.min_confidence:
+            return None
 
         stop, target = self._risk_levels(side, price, bars)
-        level_name = f"{level[0]} @ {level[1]:g}" if level else "free flow"
+        level_name = f"{ctx[0]} @ {ctx[1]:g}" if ctx else "free flow"
         return Signal(
             symbol=engine.symbol,
             side="LONG" if side == LONG else "SHORT",

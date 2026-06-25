@@ -35,6 +35,36 @@ def test_confluence_long_signal_at_level():
     assert len(sig.reasons) >= 2
 
 
+def _responsive_short_bars(close, footprint_level):
+    # 29 quiet bars build support at 100, then a responsive SHORT bar
+    # (heavy buying absorbed + climax into a new high)
+    bars = [
+        raw_bar(open=100, high=100, low=100, close=100, buy=5, sell=5, cvd=0.0)
+        for _ in range(29)
+    ]
+    bars.append(
+        raw_bar(open=100.1, high=101, low=100, close=close, buy=45, sell=5, cvd=0.0,
+                footprint={footprint_level: [45.0, 5.0]})
+    )
+    return bars
+
+
+def test_responsive_short_rejected_above_support():
+    # price sits just ABOVE the level (100) -> the level is support beneath.
+    # A responsive (reversal) short there would be fading into support -> reject.
+    eng = _engine_with(_responsive_short_bars(close=100.05, footprint_level=100.0))
+    sig = StrategyEngine(min_confidence=60, min_confirmations=2).evaluate(eng)
+    assert sig is None
+
+
+def test_responsive_short_allowed_at_resistance():
+    # same setup but price just BELOW the level -> level is resistance overhead,
+    # the correct side for a responsive short -> allowed.
+    eng = _engine_with(_responsive_short_bars(close=99.95, footprint_level=100.0))
+    sig = StrategyEngine(min_confidence=60, min_confirmations=2).evaluate(eng)
+    assert sig is not None and sig.side == "SHORT"
+
+
 def test_no_signal_in_quiet_range():
     bars = [
         raw_bar(open=100, high=100, low=100, close=100, buy=5, sell=5, cvd=0.0)
