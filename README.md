@@ -174,6 +174,27 @@ Implement a `MarketDataProvider` (see `data/base.py`) that connects to a license
 feed and yields the same `("trade", Trade)` / `("book", OrderBookSnapshot)`
 events. The engine, analysers and strategy are feed-agnostic and work unchanged.
 
+## Backtesting
+Measure the strategy on **real historical order flow** (Binance's public daily
+aggTrade dumps) — win rate, expectancy (avg R) and profit factor:
+```bash
+python -m auraorderflow.backtest --symbols BTCUSDT,ETHUSDT --days 5
+```
+Or run it with no local setup via the **AuraOrderFlow Backtest** workflow
+(Actions tab → Run workflow) and read the report in the job log.
+
+Method (kept deliberately honest):
+- Replays trades through the *same* engine/strategy used live.
+- One position per symbol+side; if a bar spans both stop and target it is
+  scored as a **loss** (pessimistic).
+- Results are in **R multiples** (1R = the trade's own stop distance); optional
+  round-trip fee via `--fee-r`.
+- Historical book depth isn't freely available, so book-based confirmations
+  (iceberg / book pressure / pull) are inactive in backtests — the
+  trade/footprint/delta core is fully exercised. Live trading uses them too.
+
+> A backtest is an estimate on past data, **not** a promise of future results.
+
 ## Tests
 ```bash
 pip install -r requirements-dev.txt
