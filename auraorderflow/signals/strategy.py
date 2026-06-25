@@ -17,23 +17,36 @@ from ..orderflow.analyzers import (
     SHORT,
     Detection,
     absorption,
+    book_pressure,
     cvd_trend,
     delta_divergence,
     exhaustion,
+    iceberg,
+    liquidity_pull,
     stacked_imbalance,
+    stop_run,
 )
 from ..orderflow.engine import OrderFlowEngine
 from .models import Signal
 
-# Per-analyser confluence weights. Absorption & stacked imbalances at a level
-# are the highest-conviction tells; CVD trend is only supportive.
+# Per-analyser confluence weights. The high-conviction *triggers* (absorption,
+# stacked imbalance, stop-run, iceberg, climax) carry the most weight; CVD/book
+# context is only confirming.
 DEFAULT_WEIGHTS = {
     "absorption": 1.3,
     "stacked_imbalance": 1.2,
-    "delta_divergence": 1.1,
+    "stop_run": 1.2,
+    "iceberg": 1.15,
     "exhaustion": 1.0,
+    "delta_divergence": 1.0,
     "cvd_trend": 0.6,
+    "book_pressure": 0.5,
+    "liquidity_pull": 0.4,
 }
+
+# A valid setup needs at least one *primary* trigger on the chosen side — the
+# way real order-flow traders work: a trigger at a level, then confirmation.
+PRIMARY = {"absorption", "stacked_imbalance", "stop_run", "iceberg", "exhaustion"}
 
 
 class StrategyEngine:
@@ -108,40 +121,44 @@ class StrategyEngine:
             delta_divergence(bars),
             absorption(last, bars, engine.book),
             exhaustion(last, bars),
+            stop_run(bars),
+            iceberg(last, engine.book),
             cvd_trend(bars),
+            book_pressure(engine.book_tracker),
+            liquidity_pull(engine.book_tracker),
         ]
 
-        long_score = 0.0
-        short_score = 0.0
-        long_reasons: list[str] = []
-        short_reasons: list[str] = []
-        long_hits = short_hits = 0
+        agg = {
+            LONG: {"score": 0.0, "reasons": [], "hits": 0, "primary": 0},
+            SHORT: {"score": 0.0, "reasons": [], "hits": 0, "primary": 0},
+        }
         for det in detections:
-            if not det.hit:
+            if not det.hit or det.side not in agg:
                 continue
             w = self.weights.get(det.name, 1.0)
-            if det.side == LONG:
-                long_score += w * det.score
-                long_reasons.append(det.detail)
-                long_hits += 1
-            elif det.side == SHORT:
-                short_score += w * det.score
-                short_reasons.append(det.detail)
-                short_hits += 1
+            bucket = agg[det.side]
+            bucket["score"] += w * det.score
+            bucket["reasons"].append(det.detail)
+            bucket["hits"] += 1
+            if det.name in PRIMARY:
+                bucket["primary"] += 1
 
-        if long_score >= short_score:
-            side, score, reasons, hits = LONG, long_score, long_reasons, long_hits
-            opp = short_score
+        if agg[LONG]["score"] >= agg[SHORT]["score"]:
+            side, win, opp = LONG, agg[LONG], agg[SHORT]
         else:
-            side, score, reasons, hits = SHORT, short_score, short_reasons, short_hits
-            opp = long_score
+            side, win, opp = SHORT, agg[SHORT], agg[LONG]
 
         # net the opposing flow against us before scoring confidence
-        net = score - 0.5 * opp
+        net = win["score"] - 0.5 * opp["score"]
         confidence = max(0.0, min(100.0, net / self.confidence_scale * 100.0))
 
-        if hits < self.min_confirmations or confidence < self.min_confidence:
+        if (
+            win["primary"] < 1
+            or win["hits"] < self.min_confirmations
+            or confidence < self.min_confidence
+        ):
             return None
+        reasons = win["reasons"]
 
         stop, target = self._risk_levels(side, price, bars)
         level_name = f"{level[0]} @ {level[1]:g}" if level else "free flow"

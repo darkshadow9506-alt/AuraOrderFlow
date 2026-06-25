@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 
+from .book import BookTracker
 from .models import Bar, OrderBookSnapshot, Trade
 from .volume_profile import VolumeProfile, build_profile
 
@@ -30,6 +31,7 @@ class OrderFlowEngine:
         self.current: Bar | None = None
         self.cvd = 0.0
         self.book: OrderBookSnapshot | None = None
+        self.book_tracker = BookTracker()
 
     # -- ingestion ----------------------------------------------------------
     def _bar_start(self, ts: int) -> int:
@@ -55,6 +57,7 @@ class OrderFlowEngine:
 
     def on_orderbook(self, snapshot: OrderBookSnapshot) -> None:
         self.book = snapshot
+        self.book_tracker.update(snapshot)
 
     def _new_bar(self, start_ms: int) -> Bar:
         return Bar(

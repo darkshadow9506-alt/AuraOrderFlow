@@ -18,13 +18,26 @@ strategy:
   signal_cooldown_seconds: 900  # min gap between same symbol+side alerts
 
 # Markets with REAL, free, real-time order flow (Binance USD-M Futures).
+# These are the deep, liquid markets where order flow is actually tradeable;
+# illiquid alts have noisy, unreliable footprints, so they are deliberately
+# excluded. `price_step` is the footprint bucket size in quote currency.
 symbols:
   - symbol: BTCUSDT
-    price_step: 5           # footprint bucket size in quote currency
+    price_step: 5
   - symbol: ETHUSDT
     price_step: 0.5
   - symbol: SOLUSDT
     price_step: 0.05
+  - symbol: BNBUSDT
+    price_step: 0.1
+  - symbol: XRPUSDT
+    price_step: 0.0005
+  - symbol: DOGEUSDT
+    price_step: 0.00005
+  - symbol: AVAXUSDT
+    price_step: 0.01
+  - symbol: LINKUSDT
+    price_step: 0.01
   - symbol: PAXGUSDT        # PAX Gold — tokenized physical gold => real flow
     price_step: 0.5
     alias: GOLD

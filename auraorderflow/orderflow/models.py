@@ -155,3 +155,8 @@ class OrderBookSnapshot:
         if total <= 0:
             return 0.0
         return (b - a) / total
+
+    def size_at(self, price: float, side: str, tol: float) -> float:
+        """Resting size within ``tol`` of ``price`` on the ``bid``/``ask`` side."""
+        levels = self.bids if side == "bid" else self.asks
+        return sum(q for p, q in levels if abs(p - price) <= tol)

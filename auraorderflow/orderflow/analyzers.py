@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .book import BookTracker
 from .models import Bar, OrderBookSnapshot
 
 LONG = "long"
@@ -245,3 +246,110 @@ def cvd_trend(bars: list[Bar], lookback: int = 10) -> Detection:
     if change < 0:
         return Detection("cvd_trend", SHORT, score, f"CVD falling ({change:.1f})")
     return Detection("cvd_trend", NEUTRAL, 0.0, "flat CVD")
+
+
+def stop_run(bars: list[Bar], lookback: int = 20) -> Detection:
+    """Stop run / liquidity grab (#5): sweep a swing then reject back inside.
+
+    Price pushes *beyond* the prior swing (running stops / triggering breakout
+    orders) but closes back on the other side of that level — a failed auction
+    that traps the breakout crowd and tends to reverse. A swept **high** that
+    closes back below = SHORT; a swept **low** reclaimed = LONG.
+    """
+    window = bars[-lookback:]
+    if len(window) < 5:
+        return Detection("stop_run", NEUTRAL, 0.0, "insufficient history")
+    last = window[-1]
+    prior = window[:-1]
+    if last.range <= 0:
+        return Detection("stop_run", NEUTRAL, 0.0, "no range")
+
+    swing_hi = max(b.high for b in prior)
+    swing_lo = min(b.low for b in prior)
+    avg_rng = sum(b.range for b in prior) / len(prior) or last.range
+    margin = avg_rng * 0.05
+
+    # swept the highs, closed back below -> trapped longs -> SHORT
+    if last.high > swing_hi + margin and last.close < swing_hi:
+        wick = (last.high - last.close) / last.range
+        return Detection(
+            "stop_run", SHORT, min(1.0, wick),
+            "swept prior highs then rejected (liquidity grab)",
+        )
+    # swept the lows, reclaimed -> trapped shorts -> LONG
+    if last.low < swing_lo - margin and last.close > swing_lo:
+        wick = (last.close - last.low) / last.range
+        return Detection(
+            "stop_run", LONG, min(1.0, wick),
+            "swept prior lows then reclaimed (liquidity grab)",
+        )
+    return Detection("stop_run", NEUTRAL, 0.0, "no sweep")
+
+
+def iceberg(
+    bar: Bar,
+    book: OrderBookSnapshot | None,
+    fill_factor: float = 4.0,
+) -> Detection:
+    """Iceberg / hidden-liquidity detection (#6).
+
+    The defining iceberg tell: far more volume *executes* at a price than was
+    ever *displayed* resting there, and price does not move through it — size is
+    being constantly refilled from hidden orders. Heavy executed sells at a
+    price showing only a small bid, with price holding => hidden buyer => LONG;
+    the mirror at the ask => SHORT.
+    """
+    if book is None or not bar.footprint:
+        return Detection("iceberg", NEUTRAL, 0.0, "no book / footprint")
+    level = max(bar.footprint, key=lambda p: sum(bar.footprint[p]))
+    buy_v, sell_v = bar.footprint[level]
+    tol = bar.price_step
+
+    if sell_v > buy_v:  # sells hammering the bid at this level
+        resting = book.size_at(level, "bid", tol)
+        if resting > 0 and sell_v >= fill_factor * resting and bar.close >= bar.open:
+            score = min(1.0, sell_v / (fill_factor * resting) - 0.5)
+            return Detection(
+                "iceberg", LONG, max(0.1, score),
+                f"{sell_v:.1f} sold into ~{resting:.1f} shown bid (buy iceberg)",
+            )
+    elif buy_v > sell_v:  # buys lifting a small ask repeatedly
+        resting = book.size_at(level, "ask", tol)
+        if resting > 0 and buy_v >= fill_factor * resting and bar.close <= bar.open:
+            score = min(1.0, buy_v / (fill_factor * resting) - 0.5)
+            return Detection(
+                "iceberg", SHORT, max(0.1, score),
+                f"{buy_v:.1f} bought into ~{resting:.1f} shown ask (sell iceberg)",
+            )
+    return Detection("iceberg", NEUTRAL, 0.0, "no hidden refill detected")
+
+
+def book_pressure(
+    tracker: BookTracker | None,
+    threshold: float = 0.25,
+    levels: int = 10,
+) -> Detection:
+    """Sustained DOM pressure (#8): time-averaged book imbalance."""
+    if tracker is None:
+        return Detection("book_pressure", NEUTRAL, 0.0, "no book")
+    imb = tracker.avg_imbalance(levels)
+    if imb > threshold:
+        return Detection("book_pressure", LONG, min(1.0, imb),
+                         f"resting bids dominate book ({imb:+.0%})")
+    if imb < -threshold:
+        return Detection("book_pressure", SHORT, min(1.0, -imb),
+                         f"resting asks dominate book ({imb:+.0%})")
+    return Detection("book_pressure", NEUTRAL, 0.0, "balanced book")
+
+
+def liquidity_pull(tracker: BookTracker | None) -> Detection:
+    """Spoofing / pulled-liquidity tell (#7): a large resting side vanished."""
+    if tracker is None:
+        return Detection("liquidity_pull", NEUTRAL, 0.0, "no book")
+    res = tracker.detect_pull()
+    if res is None:
+        return Detection("liquidity_pull", NEUTRAL, 0.0, "no pull")
+    side, strength = res
+    where = "bid support" if side == SHORT else "ask resistance"
+    return Detection("liquidity_pull", side, min(1.0, strength),
+                     f"{where} pulled from the book")
