@@ -1,0 +1,39 @@
+name: AuraOrderFlow Bot
+
+# Free "always-on-ish" runner: a GitHub Actions job is capped at 6h, so we run
+# the bot for ~5h50m then exit cleanly, and a cron restarts it. Expect a short
+# (seconds–minutes) gap between restarts. For true 24/7 with no gaps, deploy the
+# Docker image to an always-on host (see README) — the same code, no changes.
+
+on:
+  workflow_dispatch: {}        # run manually from the Actions tab
+  schedule:
+    - cron: "0 */6 * * *"      # every 6 hours (UTC)
+
+# Never run two copies at once.
+concurrency:
+  group: aura-orderflow-bot
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355       # under the 360-minute hard cap
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run AuraOrderFlow
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LOG_LEVEL: INFO
+          MAX_RUNTIME_SECONDS: "21000"   # ~5h50m, then exit for a clean restart
+        run: python -m auraorderflow

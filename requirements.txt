@@ -1,0 +1,5 @@
+# AuraOrderFlow - runtime dependencies
+websockets>=12.0       # Binance real-time market data (aggTrade + depth)
+aiohttp>=3.9           # Telegram Bot API + Binance REST snapshots
+PyYAML>=6.0            # config.yaml parsing
+python-dotenv>=1.0     # load .env in local/dev runs
