@@ -1,0 +1,29 @@
+# Fly.io deployment for AuraOrderFlow (24/7, no gaps).
+# The bot is a background worker (no inbound HTTP), so there are no [[services]]
+# — the machine just stays running and Fly auto-restarts it on crash.
+#
+# Setup (once):
+#   1. install flyctl + `fly auth login`
+#   2. edit `app` below to a unique name (or run `fly launch --no-deploy`)
+#   3. fly secrets set TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=yyy
+#   4. fly deploy
+#
+# Pick a non-US region so Binance isn't geo-blocked (fra=Frankfurt, ams=Amsterdam,
+# sin=Singapore). Once this is running 24/7, DISABLE the GitHub "AuraOrderFlow
+# Bot" workflow so you don't get duplicate alerts from two instances.
+
+app = "auraorderflow-bot"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MAX_RUNTIME_SECONDS = "0"   # never self-exit; the host keeps it alive
+  LOG_LEVEL = "INFO"
+
+# One always-on machine is plenty for this workload.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1

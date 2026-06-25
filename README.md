@@ -147,20 +147,38 @@ A GitHub Actions job is capped at **6 hours**, so the workflow runs the bot for
 ~5h50m (`MAX_RUNTIME_SECONDS=21000`) then exits cleanly and a cron restarts it.
 Expect a short gap between restarts. Good enough for alerts; not truly gapless.
 
-### Option B: always-on host (recommended for 24/7)
-Build once, run anywhere — no code changes:
+### Option B: always-on host (recommended for true 24/7, no gaps)
+The same Docker image runs anywhere — no code changes. Pick a **non-US region**
+so Binance isn't geo-blocked. **Once a 24/7 host is running, disable the GitHub
+*AuraOrderFlow Bot* workflow** so you don't get duplicate alerts from two
+instances.
+
+**Fly.io (easiest always-on; `fly.toml` is included):**
+```bash
+fly auth login
+# edit `app` in fly.toml to a unique name (or: fly launch --no-deploy)
+fly secrets set TELEGRAM_BOT_TOKEN=xxx TELEGRAM_CHAT_ID=yyy
+fly deploy
+```
+The bot is a background worker (no inbound port), so the machine just stays up
+and Fly auto-restarts it on crash. Region is `fra` (Frankfurt) in `fly.toml`.
+
+**Any VPS (Hetzner / Contabo / DigitalOcean — most bulletproof, ~€4/mo):**
 ```bash
 docker build -t auraorderflow .
 docker run -d --restart unless-stopped \
   -e TELEGRAM_BOT_TOKEN=xxx -e TELEGRAM_CHAT_ID=yyy \
   --name aura auraorderflow
 ```
-Free/cheap hosts that keep a websocket process alive: **Railway, Fly.io, Render,
-Oracle Cloud free tier**, or any small VPS. Leave `MAX_RUNTIME_SECONDS=0` there.
 
-> Note: some networks (incl. certain CI/sandbox proxies) block Binance. If you
-> see repeated `HTTP 403` on connect, the host's network policy is blocking
-> `fstream.binance.com` — GitHub Actions and normal VPS networks allow it.
+**Oracle Cloud Always Free VM** is a genuinely free 24/7 option (ARM Ampere) —
+create the VM, install Docker, then run the same `docker run` command above.
+
+Leave `MAX_RUNTIME_SECONDS=0` on always-on hosts (the default in the image).
+
+> Geo note: Binance restricts some US IPs. If a host logs repeated `HTTP
+> 403/451` on connect, switch to a non-US region. Frankfurt/Amsterdam/Singapore
+> all work.
 
 ## Telegram commands
 - `/status` — uptime, signals sent, live prices per symbol
