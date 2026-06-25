@@ -144,8 +144,11 @@ sending them — handy for testing.
    schedule).
 
 A GitHub Actions job is capped at **6 hours**, so the workflow runs the bot for
-~5h50m (`MAX_RUNTIME_SECONDS=21000`) then exits cleanly and a cron restarts it.
-Expect a short gap between restarts. Good enough for alerts; not truly gapless.
+~5h50m (`MAX_RUNTIME_SECONDS=21000`) then exits cleanly. An **hourly** schedule
+keeps one run queued behind the active one (via the concurrency group), so the
+next run starts the moment the current ends — near-gapless coverage on GitHub
+alone, for free. (Scheduled jobs can occasionally be delayed under GitHub load,
+so it's "near" gapless, not a hard guarantee; for a hard guarantee use Option B.)
 
 ### Option B: always-on host (recommended for true 24/7, no gaps)
 The same Docker image runs anywhere — no code changes. Pick a **non-US region**

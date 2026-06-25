@@ -12,7 +12,10 @@ on:
         description: "Max seconds to run (use ~90 for a quick connectivity test)"
         default: "21000"
   schedule:
-    - cron: "0 */6 * * *"      # every 6 hours (UTC)
+    # Hourly trigger: while a ~5h50m run is active, extra triggers just queue
+    # (concurrency keeps one pending), so the next run starts the moment the
+    # current one ends -> near-gapless coverage on GitHub Actions alone.
+    - cron: "0 * * * *"
 
 # Never run two copies at once.
 concurrency:
