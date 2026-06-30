@@ -197,8 +197,11 @@ def absorption(
     # Heavy selling (delta<0) but price held -> buyers absorbed -> LONG
     if bar.delta < 0 and bar.close >= bar.open:
         score = min(1.0, one_sided * (bar.volume / (avg * vol_factor)))
-        if book is not None and book.imbalance() < 0.05:
-            score *= 0.6  # no resting bid support -> weaker
+        # only dampen if the book is *strongly* stacked against the long; a
+        # roughly balanced book must not penalise a valid absorption (this was
+        # the bug that silently suppressed every live signal).
+        if book is not None and book.imbalance() < -0.4:
+            score *= 0.85
         return Detection(
             "absorption", LONG, min(1.0, score),
             f"heavy sell delta {bar.delta:.1f} absorbed, price held",
@@ -206,8 +209,8 @@ def absorption(
     # Heavy buying (delta>0) but price stalled -> sellers absorbed -> SHORT
     if bar.delta > 0 and bar.close <= bar.open:
         score = min(1.0, one_sided * (bar.volume / (avg * vol_factor)))
-        if book is not None and book.imbalance() > -0.05:
-            score *= 0.6
+        if book is not None and book.imbalance() > 0.4:
+            score *= 0.85
         return Detection(
             "absorption", SHORT, min(1.0, score),
             f"heavy buy delta +{bar.delta:.1f} absorbed, price stalled",
