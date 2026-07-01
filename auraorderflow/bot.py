@@ -44,6 +44,8 @@ class Bot:
         self._diag_reasons: Counter[str] = Counter()
         self._diag_bars = 0
         self._diag_best = 0.0
+        self._rx_trades = 0
+        self._rx_books = 0
 
         self.strategy = StrategyEngine(
             min_confidence=config.strategy.min_confidence,
@@ -105,16 +107,23 @@ class Bot:
                 pass  # not available on some platforms
 
     async def _diag_heartbeat(self) -> None:
-        """Every 5 min, log why bars are/aren't producing signals."""
+        """Every 60s, log data-flow + why bars are/aren't producing signals."""
         while not self.stop.is_set():
             try:
-                await asyncio.wait_for(self.stop.wait(), timeout=300)
+                await asyncio.wait_for(self.stop.wait(), timeout=60)
             except asyncio.TimeoutError:
+                total_bars = sum(len(s.engine.bars) for s in self.states.values())
+                sym0 = next(iter(self.states.values()))
+                cur = "yes" if sym0.engine.current is not None else "no"
+                lp = sym0.engine.last_price
                 top = ", ".join(
-                    f"{r}={n}" for r, n in self._diag_reasons.most_common(8)
+                    f"{r}={n}" for r, n in self._diag_reasons.most_common(6)
                 )
                 log.info(
-                    "diag | bars_evaluated=%d signals=%d best_conf=%.0f | %s",
+                    "diag | rx_trades=%d rx_books=%d bars=%d cur=%s px=%s | "
+                    "evaluated=%d signals=%d best=%.0f | %s",
+                    self._rx_trades, self._rx_books, total_bars, cur,
+                    f"{lp:g}" if lp else "-",
                     self._diag_bars, self.signal_count, self._diag_best, top or "-",
                 )
                 self._diag_reasons.clear()
@@ -142,6 +151,7 @@ class Bot:
             self.stop.set()
 
     def _on_trade(self, trade: Trade) -> None:
+        self._rx_trades += 1
         state = self.states.get(trade.symbol)
         if state is None:
             return
@@ -150,6 +160,7 @@ class Bot:
             self._evaluate(state)
 
     def _on_book(self, book: OrderBookSnapshot) -> None:
+        self._rx_books += 1
         state = self.states.get(book.symbol)
         if state is not None:
             state.engine.on_orderbook(book)
