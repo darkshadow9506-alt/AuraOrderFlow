@@ -62,8 +62,8 @@ class StrategyEngine:
         self,
         *,
         min_bars: int = 25,
-        min_confidence: float = 60.0,
-        min_confirmations: int = 2,
+        min_confidence: float = 70.0,
+        min_confirmations: int = 3,
         require_level: bool = True,
         level_tolerance_pct: float = 0.002,
         confidence_scale: float = 2.6,
@@ -73,6 +73,12 @@ class StrategyEngine:
         require_htf_alignment: bool = True,
         use_vwap: bool = True,
         use_prev_day_levels: bool = True,
+        # risk model (volatility-based stop, structural target — all bounded)
+        stop_atr_mult: float = 1.5,
+        min_stop_pct: float = 0.0015,
+        max_stop_pct: float = 0.01,
+        max_target_pct: float = 0.02,
+        fallback_rr: float = 1.5,
         weights: dict[str, float] | None = None,
     ) -> None:
         self.min_bars = min_bars
@@ -83,6 +89,11 @@ class StrategyEngine:
         self.confidence_scale = confidence_scale
         self.risk_reward = risk_reward
         self.imbalance_ratio = imbalance_ratio
+        self.stop_atr_mult = stop_atr_mult
+        self.min_stop_pct = min_stop_pct
+        self.max_stop_pct = max_stop_pct
+        self.max_target_pct = max_target_pct
+        self.fallback_rr = fallback_rr
         self.htf_lookback_minutes = htf_lookback_minutes
         self.require_htf_alignment = require_htf_alignment
         self.use_vwap = use_vwap
@@ -122,33 +133,7 @@ class StrategyEngine:
         strategy trade *responsive* reversals on the correct side of the
         auction instead of fading into the wrong edge.
         """
-        profile = engine.volume_profile()
-        candidates: list[tuple[str, float]] = []
-        if profile.poc is not None:
-            candidates.append(("POC", profile.poc))
-        if profile.vah is not None:
-            candidates.append(("Value Area High", profile.vah))
-        if profile.val is not None:
-            candidates.append(("Value Area Low", profile.val))
-        candidates += [("HVN", p) for p in profile.hvns]
-        candidates += [("LVN", p) for p in profile.lvns]
-
-        # multi-timeframe / session structural levels
-        if self.use_vwap and engine.vwap is not None:
-            candidates.append(("VWAP", engine.vwap))
-        if self.use_prev_day_levels:
-            if engine.prev_day_high is not None:
-                candidates.append(("Prev Day High", engine.prev_day_high))
-            if engine.prev_day_low is not None:
-                candidates.append(("Prev Day Low", engine.prev_day_low))
-
-        bars = engine.recent_bars(self.min_bars)
-        if len(bars) >= 5:
-            swing_hi = max(b.high for b in bars[:-1])
-            swing_lo = min(b.low for b in bars[:-1])
-            candidates.append(("Swing High", swing_hi))
-            candidates.append(("Swing Low", swing_lo))
-
+        candidates = self._candidate_levels(engine)
         tol = price * self.level_tolerance_pct
         best = None
         best_dist = tol
@@ -273,7 +258,7 @@ class StrategyEngine:
 
         self.last_reason = "SIGNAL"
 
-        stop, target = self._risk_levels(side, price, bars)
+        stop, target = self._risk_levels(side, price, bars, engine)
         level_name = f"{ctx[0]} @ {ctx[1]:g}" if ctx else "free flow"
         return Signal(
             symbol=engine.symbol,
@@ -287,17 +272,68 @@ class StrategyEngine:
             target=target,
         )
 
-    def _risk_levels(self, side: str, price: float, bars: list) -> tuple[float, float]:
-        window = bars[-self.min_bars:]
-        swing_lo = min(b.low for b in window)
-        swing_hi = max(b.high for b in window)
-        buffer = max((swing_hi - swing_lo) * 0.05, price * 0.0005)
-        if side == LONG:
-            stop = swing_lo - buffer
-            risk = max(price - stop, price * 0.0005)
-            target = price + risk * self.risk_reward
+    def _candidate_levels(self, engine: OrderFlowEngine) -> list[tuple[str, float]]:
+        """Structural levels: volume profile + VWAP + prev-day + swings."""
+        profile = engine.volume_profile()
+        candidates: list[tuple[str, float]] = []
+        if profile.poc is not None:
+            candidates.append(("POC", profile.poc))
+        if profile.vah is not None:
+            candidates.append(("Value Area High", profile.vah))
+        if profile.val is not None:
+            candidates.append(("Value Area Low", profile.val))
+        candidates += [("HVN", p) for p in profile.hvns]
+        candidates += [("LVN", p) for p in profile.lvns]
+        if self.use_vwap and engine.vwap is not None:
+            candidates.append(("VWAP", engine.vwap))
+        if self.use_prev_day_levels:
+            if engine.prev_day_high is not None:
+                candidates.append(("Prev Day High", engine.prev_day_high))
+            if engine.prev_day_low is not None:
+                candidates.append(("Prev Day Low", engine.prev_day_low))
+        bars = engine.recent_bars(self.min_bars)
+        if len(bars) >= 5:
+            candidates.append(("Swing High", max(b.high for b in bars[:-1])))
+            candidates.append(("Swing Low", min(b.low for b in bars[:-1])))
+        return candidates
+
+    @staticmethod
+    def _atr(bars: list, period: int = 14) -> float:
+        window = [b for b in bars[-period:] if b.range > 0]
+        return sum(b.range for b in window) / len(window) if window else 0.0
+
+    def _target_level(self, engine, price, side, lo, hi):
+        """Nearest structural level in the trade direction, ``lo``..``hi`` away."""
+        best = None
+        best_dist = None
+        for name, lvl in self._candidate_levels(engine):
+            dist = (lvl - price) if side == LONG else (price - lvl)
+            if lo <= dist <= hi and (best_dist is None or dist < best_dist):
+                best, best_dist = (name, lvl), dist
+        return best
+
+    def _risk_levels(self, side, price, bars, engine) -> tuple[float, float]:
+        """Volatility-based stop + a real structural target, both bounded.
+
+        Stop distance = ATR x mult, clamped to [min_stop_pct, max_stop_pct] of
+        price. Target = the nearest structural level in the trade direction that
+        is >= the stop distance away and within max_target_pct of price; if none,
+        fall back to stop_distance x fallback_rr. Everything is capped so targets
+        are realistic intraday (no "BTC long to 180k").
+        """
+        atr = self._atr(bars) or (price * self.min_stop_pct)
+        stop_dist = atr * self.stop_atr_mult
+        stop_dist = max(price * self.min_stop_pct,
+                        min(stop_dist, price * self.max_stop_pct))
+        max_target = price * self.max_target_pct
+
+        tgt = self._target_level(engine, price, side, stop_dist, max_target)
+        if tgt is not None:
+            target = tgt[1]
+        elif side == LONG:
+            target = min(price + stop_dist * self.fallback_rr, price + max_target)
         else:
-            stop = swing_hi + buffer
-            risk = max(stop - price, price * 0.0005)
-            target = price - risk * self.risk_reward
+            target = max(price - stop_dist * self.fallback_rr, price - max_target)
+
+        stop = price - stop_dist if side == LONG else price + stop_dist
         return round(stop, 8), round(target, 8)

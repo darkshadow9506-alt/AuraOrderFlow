@@ -49,6 +49,14 @@ class StrategyConfig:
     require_htf_alignment: bool = True
     use_vwap: bool = True
     use_prev_day_levels: bool = True
+    # per-symbol cooldown (any side) to stop bursts of alerts on one market
+    symbol_cooldown_seconds: int = 1800
+    # risk model
+    stop_atr_mult: float = 1.5
+    min_stop_pct: float = 0.0015
+    max_stop_pct: float = 0.01
+    max_target_pct: float = 0.02
+    fallback_rr: float = 1.5
 
 
 @dataclass(slots=True)
@@ -118,6 +126,12 @@ def load_config(path: str | os.PathLike | None = None) -> AppConfig:
         require_htf_alignment=bool(s_raw.get("require_htf_alignment", True)),
         use_vwap=bool(s_raw.get("use_vwap", True)),
         use_prev_day_levels=bool(s_raw.get("use_prev_day_levels", True)),
+        symbol_cooldown_seconds=int(s_raw.get("symbol_cooldown_seconds", 1800)),
+        stop_atr_mult=float(s_raw.get("stop_atr_mult", 1.5)),
+        min_stop_pct=float(s_raw.get("min_stop_pct", 0.0015)),
+        max_stop_pct=float(s_raw.get("max_stop_pct", 0.01)),
+        max_target_pct=float(s_raw.get("max_target_pct", 0.02)),
+        fallback_rr=float(s_raw.get("fallback_rr", 1.5)),
     )
 
     chat_ids = [

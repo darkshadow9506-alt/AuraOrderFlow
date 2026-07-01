@@ -8,20 +8,28 @@ profile_window: 240        # bars used to build the volume profile (~4h of 1m)
 history_window: 300        # bars kept in memory per symbol
 
 strategy:
-  min_confidence: 60        # 0-100; higher = fewer, higher-quality signals
-  min_confirmations: 2      # how many order-flow patterns must agree
+  min_confidence: 70        # 0-100; higher = fewer, higher-quality signals
+  min_confirmations: 3      # how many order-flow patterns must agree
   require_level: true       # only fire at structural levels (rule #1)
   level_tolerance_pct: 0.002    # how close to a level counts as "at" it (0.2%)
   confidence_scale: 2.6     # confluence-score -> confidence calibration
-  risk_reward: 2.0          # suggested target = risk_reward * stop distance
+  risk_reward: 2.0          # fallback target multiple (structural target preferred)
   imbalance_ratio: 3.0      # footprint imbalance threshold (3:1)
-  signal_cooldown_seconds: 900   # min gap between same symbol+side alerts
+  signal_cooldown_seconds: 1800   # min gap between same symbol+side alerts (30m)
+  symbol_cooldown_seconds: 1800   # min gap between ANY alerts on one symbol (anti-burst)
 
   # --- multi-timeframe layer ---
   htf_lookback_minutes: 60     # higher-timeframe trend window (1m bars => ~1h)
   require_htf_alignment: true  # continuation trades must match the HTF trend
   use_vwap: true               # session VWAP as a structural level
   use_prev_day_levels: true    # previous-day high/low as structural levels
+
+  # --- risk model (realistic, bounded stops & targets) ---
+  stop_atr_mult: 1.5           # stop distance = ATR(14) * this
+  min_stop_pct: 0.0015         # stop >= 0.15% of price
+  max_stop_pct: 0.01           # stop <= 1% of price
+  max_target_pct: 0.02         # target <= 2% of price (no absurd far targets)
+  fallback_rr: 1.5             # if no structural target within range
 
 # Markets with REAL, free, real-time order flow (Binance USD-M Futures).
 # These are the deep, liquid markets where order flow is actually tradeable;

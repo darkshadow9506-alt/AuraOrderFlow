@@ -38,6 +38,8 @@ class Bot:
         self.started_at = time.time()
         self.signal_count = 0
         self._last_signal: dict[tuple[str, str], int] = {}
+        # anti-burst: last alert time on a symbol regardless of side
+        self._last_symbol_signal: dict[str, int] = {}
         # strong refs to in-flight send tasks so they are not GC'd mid-flight
         self._bg_tasks: set[asyncio.Task] = set()
         # diagnostics: histogram of why bars did/didn't produce a signal
@@ -59,6 +61,11 @@ class Bot:
             require_htf_alignment=config.strategy.require_htf_alignment,
             use_vwap=config.strategy.use_vwap,
             use_prev_day_levels=config.strategy.use_prev_day_levels,
+            stop_atr_mult=config.strategy.stop_atr_mult,
+            min_stop_pct=config.strategy.min_stop_pct,
+            max_stop_pct=config.strategy.max_stop_pct,
+            max_target_pct=config.strategy.max_target_pct,
+            fallback_rr=config.strategy.fallback_rr,
         )
 
         self.states: dict[str, SymbolState] = {}
@@ -177,11 +184,19 @@ class Bot:
             return
         key = signal_obj.dedup_key()
         now_ms = int(time.time() * 1000)
+        # 1) same symbol+side cooldown (don't repeat an identical call)
         cooldown = self.config.strategy.signal_cooldown_seconds * 1000
         last = self._last_signal.get(key, 0)
         if now_ms - last < cooldown:
             return
+        # 2) per-symbol anti-burst cooldown (any side) — stops 2-3 alerts on
+        # one market firing back-to-back, which is noise for day trading.
+        sym_cooldown = self.config.strategy.symbol_cooldown_seconds * 1000
+        sym_last = self._last_symbol_signal.get(signal_obj.symbol, 0)
+        if now_ms - sym_last < sym_cooldown:
+            return
         self._last_signal[key] = now_ms
+        self._last_symbol_signal[signal_obj.symbol] = now_ms
         self.signal_count += 1
         # label override (e.g. PAXGUSDT -> GOLD)
         text = signal_obj.to_telegram()
