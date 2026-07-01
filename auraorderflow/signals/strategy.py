@@ -88,6 +88,10 @@ class StrategyEngine:
         self.use_vwap = use_vwap
         self.use_prev_day_levels = use_prev_day_levels
         self.weights = weights or DEFAULT_WEIGHTS
+        # diagnostics: why the most recent evaluate() did/didn't fire
+        self.last_reason = ""
+        self.last_confidence = 0.0
+        self.last_side = ""
 
     # -- higher-timeframe bias ---------------------------------------------
     def _htf_bias(self, engine: OrderFlowEngine) -> str:
@@ -160,16 +164,20 @@ class StrategyEngine:
 
     # -- main evaluation ----------------------------------------------------
     def evaluate(self, engine: OrderFlowEngine) -> Signal | None:
+        self.last_reason = "few_bars"
+        self.last_confidence = 0.0
         bars = engine.recent_bars(max(self.min_bars, 30))
         if len(bars) < self.min_bars:
             return None
         last = bars[-1]
         price = last.close
         if price <= 0:
+            self.last_reason = "bad_price"
             return None
 
         ctx = self._level_context(engine, price)
         if self.require_level and ctx is None:
+            self.last_reason = "no_level"
             return None
 
         detections: list[Detection] = [
@@ -213,8 +221,13 @@ class StrategyEngine:
         # net the opposing flow against us before scoring confidence
         net = win["score"] - 0.5 * opp["score"]
         confidence = max(0.0, min(100.0, net / self.confidence_scale * 100.0))
+        self.last_confidence = confidence
+        self.last_side = "LONG" if side == LONG else "SHORT"
 
         if win["primary"] < 1 or win["hits"] < self.min_confirmations:
+            self.last_reason = (
+                f"weak(primary={win['primary']},hits={win['hits']})"
+            )
             return None
 
         # -- auction location logic (initiative vs responsive) --------------
@@ -225,8 +238,10 @@ class StrategyEngine:
             eps = price * 1e-6
             # don't fade into the wrong side of the auction
             if side == LONG and lvl > price + eps:
+                self.last_reason = "loc_reject"
                 return None  # responsive long beneath resistance
             if side == SHORT and lvl < price - eps:
+                self.last_reason = "loc_reject"
                 return None  # responsive short above support
             confidence = min(100.0, confidence * 1.05)  # location confluence
             reasons = [
@@ -244,14 +259,19 @@ class StrategyEngine:
             # initiative/continuation must not fight the higher-timeframe trend;
             # responsive reversals at a level are allowed to fade it.
             if not aligned and not responsive and self.require_htf_alignment:
+                self.last_reason = "htf_reject"
                 return None
             if aligned:
                 confidence = min(100.0, confidence * 1.05)
+                self.last_confidence = confidence
                 trend = "uptrend" if htf == LONG else "downtrend"
                 reasons = [f"with higher-timeframe {trend}"] + reasons
 
         if confidence < self.min_confidence:
+            self.last_reason = f"low_conf({confidence:.0f})"
             return None
+
+        self.last_reason = "SIGNAL"
 
         stop, target = self._risk_levels(side, price, bars)
         level_name = f"{ctx[0]} @ {ctx[1]:g}" if ctx else "free flow"

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import signal
 import time
+from collections import Counter
 
 from .config import AppConfig, SymbolConfig
 from .data import BinanceProvider
@@ -39,6 +40,10 @@ class Bot:
         self._last_signal: dict[tuple[str, str], int] = {}
         # strong refs to in-flight send tasks so they are not GC'd mid-flight
         self._bg_tasks: set[asyncio.Task] = set()
+        # diagnostics: histogram of why bars did/didn't produce a signal
+        self._diag_reasons: Counter[str] = Counter()
+        self._diag_bars = 0
+        self._diag_best = 0.0
 
         self.strategy = StrategyEngine(
             min_confidence=config.strategy.min_confidence,
@@ -79,6 +84,7 @@ class Bot:
                     self.notifier.listen_commands(self.stop, self._handle_command),
                     name="commands",
                 ),
+                asyncio.create_task(self._diag_heartbeat(), name="diag"),
             ]
             if self.config.max_runtime_seconds > 0:
                 tasks.append(asyncio.create_task(self._runtime_guard(), name="guard"))
@@ -97,6 +103,22 @@ class Bot:
                 loop.add_signal_handler(sig, self.stop.set)
             except (NotImplementedError, RuntimeError):
                 pass  # not available on some platforms
+
+    async def _diag_heartbeat(self) -> None:
+        """Every 5 min, log why bars are/aren't producing signals."""
+        while not self.stop.is_set():
+            try:
+                await asyncio.wait_for(self.stop.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                top = ", ".join(
+                    f"{r}={n}" for r, n in self._diag_reasons.most_common(8)
+                )
+                log.info(
+                    "diag | bars_evaluated=%d signals=%d best_conf=%.0f | %s",
+                    self._diag_bars, self.signal_count, self._diag_best, top or "-",
+                )
+                self._diag_reasons.clear()
+                self._diag_best = 0.0
 
     async def _runtime_guard(self) -> None:
         try:
@@ -134,6 +156,11 @@ class Bot:
 
     def _evaluate(self, state: SymbolState) -> None:
         signal_obj = self.strategy.evaluate(state.engine)
+        # diagnostics: record why this closed bar did / didn't fire
+        self._diag_bars += 1
+        self._diag_reasons[self.strategy.last_reason] += 1
+        if self.strategy.last_confidence > self._diag_best:
+            self._diag_best = self.strategy.last_confidence
         if signal_obj is None:
             return
         key = signal_obj.dedup_key()
