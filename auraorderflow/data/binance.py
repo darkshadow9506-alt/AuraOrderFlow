@@ -54,8 +54,10 @@ class BinanceProvider(MarketDataProvider):
         """Stream names to subscribe to (aggTrade + partial depth per symbol)."""
         params: list[str] = []
         for s in self.symbols:
-            params.append(f"{s}@aggTrade")
-            params.append(f"{s}@trade")   # DIAG: is ANY trade stream delivered?
+            # @trade (individual trades) is what actually streams on this
+            # endpoint; @aggTrade returns nothing here. @trade is finer-grained
+            # and carries the same maker flag, so it's ideal for footprints.
+            params.append(f"{s}@trade")
             params.append(f"{s}@depth{self.depth_levels}@{self.depth_interval_ms}ms")
         return params
 
@@ -113,7 +115,8 @@ class BinanceProvider(MarketDataProvider):
             log.info("sample msg %d: stream=%s keys=%s",
                      self._samples_logged, msg.get("stream"), list(data.keys()))
 
-        if etype == "aggTrade":
+        # both @trade (individual) and @aggTrade carry price/qty/maker-flag
+        if etype in ("trade", "aggTrade"):
             try:
                 return (
                     "trade",

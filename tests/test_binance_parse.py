@@ -37,6 +37,18 @@ def test_parse_aggtrade_buy_side():
     assert payload.is_buy is True and payload.signed_qty == 1.0
 
 
+def test_parse_raw_trade_event():
+    # the @trade stream sends e="trade" (not "aggTrade"); must still parse
+    raw = json.dumps(
+        {"e": "trade", "s": "BTCUSDT", "p": "100.5", "q": "2",
+         "m": True, "T": 1700000000000}
+    )
+    kind, payload = _provider()._parse(raw)
+    assert kind == "trade"
+    assert payload.symbol == "BTCUSDT" and payload.price == 100.5
+    assert payload.is_buyer_maker is True and payload.is_buy is False
+
+
 def test_parse_depth_snapshot():
     raw = json.dumps(
         {
