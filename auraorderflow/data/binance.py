@@ -27,7 +27,7 @@ from .base import MarketDataProvider, MarketEvent
 
 log = get_logger(__name__)
 
-FUTURES_WS = "wss://fstream.binance.com/stream?streams="
+FUTURES_WS = "wss://fstream.binance.com/ws"
 
 
 class BinanceProvider(MarketDataProvider):
@@ -50,24 +50,31 @@ class BinanceProvider(MarketDataProvider):
         self.etype_counts: Counter[str] = Counter()
         self._samples_logged = 0
 
-    def _url(self) -> str:
-        streams: list[str] = []
+    def _params(self) -> list[str]:
+        """Stream names to subscribe to (aggTrade + partial depth per symbol)."""
+        params: list[str] = []
         for s in self.symbols:
-            streams.append(f"{s}@aggTrade")
-            streams.append(f"{s}@depth{self.depth_levels}@{self.depth_interval_ms}ms")
-        return self.base_url + "/".join(streams)
+            params.append(f"{s}@aggTrade")
+            params.append(f"{s}@depth{self.depth_levels}@{self.depth_interval_ms}ms")
+        return params
 
     async def stream(self, stop: asyncio.Event) -> AsyncIterator[MarketEvent]:
         backoff = 1.0
-        url = self._url()
         while not stop.is_set():
             try:
                 log.info("connecting to %s (%d symbols)", self.name, len(self.symbols))
                 async with websockets.connect(
-                    url, ping_interval=20, ping_timeout=20, max_queue=2048
+                    self.base_url, ping_interval=20, ping_timeout=20, max_queue=2048
                 ) as ws:
                     backoff = 1.0  # reset on a successful connect
-                    log.info("connected; streaming order flow")
+                    # explicit SUBSCRIBE — the ?streams= URL silently dropped
+                    # the aggTrade streams (only depth was delivered).
+                    params = self._params()
+                    await ws.send(json.dumps(
+                        {"method": "SUBSCRIBE", "params": params, "id": 1}
+                    ))
+                    log.info("subscribed to %d streams; streaming order flow",
+                             len(params))
                     while not stop.is_set():
                         try:
                             raw = await asyncio.wait_for(ws.recv(), timeout=30)
