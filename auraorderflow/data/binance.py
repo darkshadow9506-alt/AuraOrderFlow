@@ -55,8 +55,8 @@ class BinanceProvider(MarketDataProvider):
         params: list[str] = []
         for s in self.symbols:
             params.append(f"{s}@aggTrade")
-            # DIAG: temporarily aggTrade-only to isolate the no-trades bug
-            # params.append(f"{s}@depth{self.depth_levels}@{self.depth_interval_ms}ms")
+            params.append(f"{s}@trade")   # DIAG: is ANY trade stream delivered?
+            params.append(f"{s}@depth{self.depth_levels}@{self.depth_interval_ms}ms")
         return params
 
     async def stream(self, stop: asyncio.Event) -> AsyncIterator[MarketEvent]:
