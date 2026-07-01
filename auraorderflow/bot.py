@@ -121,10 +121,11 @@ class Bot:
                 )
                 log.info(
                     "diag | rx_trades=%d rx_books=%d bars=%d cur=%s px=%s | "
-                    "evaluated=%d signals=%d best=%.0f | %s",
+                    "evaluated=%d signals=%d best=%.0f | etypes=%s | %s",
                     self._rx_trades, self._rx_books, total_bars, cur,
                     f"{lp:g}" if lp else "-",
-                    self._diag_bars, self.signal_count, self._diag_best, top or "-",
+                    self._diag_bars, self.signal_count, self._diag_best,
+                    dict(self.provider.etype_counts), top or "-",
                 )
                 self._diag_reasons.clear()
                 self._diag_best = 0.0

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import Counter
 from typing import AsyncIterator
 
 import websockets
@@ -45,6 +46,9 @@ class BinanceProvider(MarketDataProvider):
         self.depth_levels = depth_levels
         self.depth_interval_ms = depth_interval_ms
         self.base_url = base_url
+        # diagnostics
+        self.etype_counts: Counter[str] = Counter()
+        self._samples_logged = 0
 
     def _url(self) -> str:
         streams: list[str] = []
@@ -93,6 +97,13 @@ class BinanceProvider(MarketDataProvider):
             return None
         data = msg.get("data", msg)
         etype = data.get("e")
+
+        # diagnostics: what is Binance actually sending?
+        self.etype_counts[str(etype)] += 1
+        if self._samples_logged < 4:
+            self._samples_logged += 1
+            log.info("sample msg %d: stream=%s keys=%s",
+                     self._samples_logged, msg.get("stream"), list(data.keys()))
 
         if etype == "aggTrade":
             try:
