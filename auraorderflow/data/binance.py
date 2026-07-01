@@ -107,13 +107,7 @@ class BinanceProvider(MarketDataProvider):
             return None
         data = msg.get("data", msg)
         etype = data.get("e")
-
-        # diagnostics: what is Binance actually sending?
-        self.etype_counts[str(etype)] += 1
-        if self._samples_logged < 4:
-            self._samples_logged += 1
-            log.info("sample msg %d: stream=%s keys=%s",
-                     self._samples_logged, msg.get("stream"), list(data.keys()))
+        self.etype_counts[str(etype)] += 1  # lightweight health metric
 
         # both @trade (individual) and @aggTrade carry price/qty/maker-flag
         if etype in ("trade", "aggTrade"):

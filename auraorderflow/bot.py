@@ -107,10 +107,10 @@ class Bot:
                 pass  # not available on some platforms
 
     async def _diag_heartbeat(self) -> None:
-        """Every 60s, log data-flow + why bars are/aren't producing signals."""
+        """Every 5 min, log data-flow + why bars are/aren't producing signals."""
         while not self.stop.is_set():
             try:
-                await asyncio.wait_for(self.stop.wait(), timeout=60)
+                await asyncio.wait_for(self.stop.wait(), timeout=300)
             except asyncio.TimeoutError:
                 total_bars = sum(len(s.engine.bars) for s in self.states.values())
                 sym0 = next(iter(self.states.values()))
